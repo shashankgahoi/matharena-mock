@@ -253,7 +253,7 @@ with st.sidebar:
 
     if st.session_state.page == "test":
         elapsed = time.time() - st.session_state.start_time
-        exam = EXAM_META[st.session_state.set_key]["exam"]
+        exam = EXAM_META.get(st.session_state.set_key, {}).get("exam") or ("IPM" if "IPM" in st.session_state.set_key else "CAT")
         limit = IPM_TIME if exam == "IPM" else CAT_TIME
         remaining = max(0, limit - elapsed)
         css_class = "timer-critical" if remaining < 120 else ("timer-warning" if remaining < 300 else "")
