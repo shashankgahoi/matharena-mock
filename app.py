@@ -7,8 +7,10 @@ import json
 import time
 import random
 import re
+import io
 from pathlib import Path
 import streamlit as st
+from fpdf import FPDF
 
 # ─── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -43,34 +45,32 @@ CAT_MARKING  = {"correct": 3,  "wrong": -1, "unattempted": 0}
 IPM_MARKING  = {"correct": 4,  "wrong": -1, "unattempted": 0}
 
 EXAM_META = {
-    "CAT_2025_S1": {"label": "CAT 2025 — Slot 1", "exam": "CAT"},
-    "CAT_2025_S2": {"label": "CAT 2025 — Slot 2", "exam": "CAT"},
-    "CAT_2025_S3": {"label": "CAT 2025 — Slot 3", "exam": "CAT"},
-    "CAT_2024_S1": {"label": "CAT 2024 — Slot 1", "exam": "CAT"},
-    "CAT_2024_S2": {"label": "CAT 2024 — Slot 2", "exam": "CAT"},
-    "CAT_2024_S3": {"label": "CAT 2024 — Slot 3", "exam": "CAT"},
-    "CAT_2023_S1": {"label": "CAT 2023 — Slot 1", "exam": "CAT"},
-    "CAT_2023_S2": {"label": "CAT 2023 — Slot 2", "exam": "CAT"},
-    "CAT_2023_S3": {"label": "CAT 2023 — Slot 3", "exam": "CAT"},
-    "CAT_2022_S1": {"label": "CAT 2022 — Slot 1", "exam": "CAT"},
-    "CAT_2022_S2": {"label": "CAT 2022 — Slot 2", "exam": "CAT"},
-    "CAT_2022_S3": {"label": "CAT 2022 — Slot 3", "exam": "CAT"},
-    "CAT_2021_S1": {"label": "CAT 2021 — Slot 1", "exam": "CAT"},
-    "CAT_2021_S2": {"label": "CAT 2021 — Slot 2", "exam": "CAT"},
-    "CAT_2021_S3": {"label": "CAT 2021 — Slot 3", "exam": "CAT"},
-    "CAT_2020_S1": {"label": "CAT 2020 — Slot 1", "exam": "CAT"},
-    "CAT_2020_S2": {"label": "CAT 2020 — Slot 2", "exam": "CAT"},
-    "CAT_2020_S3": {"label": "CAT 2020 — Slot 3", "exam": "CAT"},
-    "CAT_2019_S1": {"label": "CAT 2019 — Slot 1", "exam": "CAT"},
-    "CAT_2019_S2": {"label": "CAT 2019 — Slot 2", "exam": "CAT"},
-    "CAT_2018_S1": {"label": "CAT 2018 — Slot 1", "exam": "CAT"},
-    "CAT_2018_S2": {"label": "CAT 2018 — Slot 2", "exam": "CAT"},
-    "CAT_2017_S1": {"label": "CAT 2017 — Slot 1", "exam": "CAT"},
-    "CAT_2017_S2": {"label": "CAT 2017 — Slot 2", "exam": "CAT"},
-    "IPM_2024":    {"label": "IPMAT 2024 (IIM Indore)", "exam": "IPM"},
-    "IPM_2023":    {"label": "IPMAT 2023 (IIM Indore)", "exam": "IPM"},
-    "IPM_2022":    {"label": "IPMAT 2022 (IIM Indore)", "exam": "IPM"},
-    "IPM_2020":    {"label": "IPMAT 2020 (IIM Indore)", "exam": "IPM"},
+    # CAT Practice Sets
+    "CAT_SET_1A": {"label": "CAT Practice Set 1A", "exam": "CAT"},
+    "CAT_SET_1B": {"label": "CAT Practice Set 1B", "exam": "CAT"},
+    "CAT_SET_1C": {"label": "CAT Practice Set 1C", "exam": "CAT"},
+    "CAT_SET_2A": {"label": "CAT Practice Set 2A", "exam": "CAT"},
+    "CAT_SET_2B": {"label": "CAT Practice Set 2B", "exam": "CAT"},
+    "CAT_SET_2C": {"label": "CAT Practice Set 2C", "exam": "CAT"},
+    "CAT_SET_3A": {"label": "CAT Practice Set 3A", "exam": "CAT"},
+    "CAT_SET_3B": {"label": "CAT Practice Set 3B", "exam": "CAT"},
+    "CAT_SET_3C": {"label": "CAT Practice Set 3C", "exam": "CAT"},
+    # CAT Full Mocks
+    "CAT_MOCK_1": {"label": "CAT Full Mock 1",     "exam": "CAT"},
+    "CAT_MOCK_2": {"label": "CAT Full Mock 2",     "exam": "CAT"},
+    "CAT_MOCK_3": {"label": "CAT Full Mock 3",     "exam": "CAT"},
+    "CAT_MOCK_4": {"label": "CAT Full Mock 4",     "exam": "CAT"},
+    "CAT_MOCK_5": {"label": "CAT Full Mock 5",     "exam": "CAT"},
+    "CAT_MOCK_6": {"label": "CAT Full Mock 6",     "exam": "CAT"},
+    "CAT_MOCK_7": {"label": "CAT Full Mock 7",     "exam": "CAT"},
+    "CAT_MOCK_8": {"label": "CAT Full Mock 8",     "exam": "CAT"},
+    # IPM Full Mocks
+    "IPM_MOCK_1": {"label": "IPM Full Mock 1",     "exam": "IPM"},
+    "IPM_MOCK_2": {"label": "IPM Full Mock 2",     "exam": "IPM"},
+    "IPM_MOCK_3": {"label": "IPM Full Mock 3",     "exam": "IPM"},
+    "IPM_MOCK_4": {"label": "IPM Full Mock 4",     "exam": "IPM"},
+    "IPM_MOCK_5": {"label": "IPM Full Mock 5",     "exam": "IPM"},
+    "IPM_MOCK_6": {"label": "IPM Full Mock 6",     "exam": "IPM"},
 }
 
 # ─── Data loading ───────────────────────────────────────────────────────────────
@@ -93,6 +93,119 @@ def clean_html(text: str) -> str:
 
 def get_marking(exam: str) -> dict:
     return IPM_MARKING if exam == "IPM" else CAT_MARKING
+
+def generate_pdf(questions, label, exam, include_answers=False):
+    """Generate a downloadable PDF question paper."""
+    marking = get_marking(exam)
+    total_q  = len(questions)
+    max_marks = total_q * marking["correct"]
+    duration  = "90 minutes" if exam == "IPM" else "40 minutes"
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # ── Header ──────────────────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "MathArena — Career Launcher", ln=True, align="C")
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, label, ln=True, align="C")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6,
+        f"Questions: {total_q}   |   Max Marks: {max_marks}   |   Duration: {duration}   |   "
+        f"Marking: +{marking['correct']} / {marking['wrong']} (MCQ) / 0 (TITA)",
+        ln=True, align="C")
+    pdf.ln(4)
+    pdf.set_draw_color(37, 99, 235)
+    pdf.set_line_width(0.5)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
+
+    # ── Instructions ────────────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 5, "Instructions:", ln=True)
+    pdf.set_font("Helvetica", "", 9)
+    instructions = [
+        f"1. This paper has {total_q} questions. Each MCQ has 4 options; TITA requires a numeric answer.",
+        f"2. MCQ: +{marking['correct']} for correct, {marking['wrong']} for wrong, 0 for unattempted.",
+        "3. TITA: +3 for correct, 0 for wrong/unattempted (no negative marking).",
+        f"4. Total time: {duration}. Manage your time wisely.",
+    ]
+    for ins in instructions:
+        pdf.multi_cell(0, 5, ins)
+    pdf.ln(4)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(6)
+
+    # ── Questions ────────────────────────────────────────────────────────────
+    for i, q in enumerate(questions, 1):
+        q_text = clean_html(q.get("q", ""))
+        q_type = q.get("type", "MCQ")
+        topic  = q.get("topic", "")
+        opts   = q.get("opts", [])
+
+        # Question number + type badge
+        pdf.set_font("Helvetica", "B", 10)
+        badge = f"[{q_type}]"
+        pdf.set_fill_color(239, 246, 255)
+        pdf.cell(0, 6, f"Q{i}.  {badge}  [{topic}]", ln=True, fill=True)
+
+        # Question text
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 5, q_text, border=0)
+        pdf.ln(1)
+
+        # Options
+        if q_type == "MCQ" and opts:
+            option_labels = ["(A)", "(B)", "(C)", "(D)"]
+            for j, opt in enumerate(opts[:4]):
+                pdf.set_font("Helvetica", "", 10)
+                label_text = option_labels[j] if j < len(option_labels) else f"({j+1})"
+                pdf.cell(10, 5, label_text)
+                pdf.multi_cell(0, 5, clean_html(str(opt)))
+        else:
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.cell(0, 5, "Answer: _____________ (Write numeric answer)", ln=True)
+
+        # Answer (if answer key mode)
+        if include_answers:
+            ans = q.get("ans", "")
+            pdf.set_font("Helvetica", "BI", 9)
+            pdf.set_text_color(22, 163, 74)
+            if q_type == "MCQ" and opts and ans in opts:
+                ans_label = ["A","B","C","D"][opts.index(ans)]
+                pdf.cell(0, 5, f"  Ans: ({ans_label}) {ans}", ln=True)
+            else:
+                pdf.cell(0, 5, f"  Ans: {ans}", ln=True)
+            pdf.set_text_color(0, 0, 0)
+
+        pdf.ln(3)
+
+    # ── Answer Key page (if not inline) ─────────────────────────────────────
+    if not include_answers:
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 10, "Answer Key", ln=True, align="C")
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "", 10)
+        cols = 4
+        col_w = 45
+        for i, q in enumerate(questions, 1):
+            ans  = q.get("ans", "")
+            opts = q.get("opts", [])
+            if q.get("type") == "MCQ" and opts and ans in opts:
+                ans_disp = ["A","B","C","D"][opts.index(ans)]
+            else:
+                ans_disp = str(ans)
+            pdf.cell(col_w, 7, f"Q{i:2d}: {ans_disp}", border=1)
+            if i % cols == 0:
+                pdf.ln()
+        pdf.ln(10)
+
+    buf = io.BytesIO()
+    pdf.output(buf)
+    buf.seek(0)
+    return buf.getvalue()
 
 def score_answers(questions, answers, exam):
     marking = get_marking(exam)
@@ -315,7 +428,7 @@ if st.session_state.page == "home":
     <div class="header-bar">
       <div>
         <h1>🧮 MathArena Mock Tests</h1>
-        <div class="subtitle">Career Launcher · CAT & IPM Quantitative Aptitude · 721 Questions</div>
+        <div class="subtitle">Career Launcher · CAT & IPM Quantitative Aptitude · Practice Mocks</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -389,6 +502,24 @@ if st.session_state.page == "home":
                 """, unsafe_allow_html=True)
 
     st.divider()
+
+    # ── PDF Download before starting ─────────────────────────────────────────
+    if preview_qs and not selected_key.startswith("__RANDOM"):
+        with st.expander("📄 Download this paper as PDF"):
+            dl_label = EXAM_META.get(selected_key, {}).get("label", selected_key.replace("_"," "))
+            dl_exam  = "IPM" if "IPM" in selected_key else "CAT"
+            dc1, dc2 = st.columns(2)
+            with dc1:
+                paper_pdf = generate_pdf(preview_qs, dl_label, dl_exam, include_answers=False)
+                st.download_button("⬇️ Question Paper (PDF)", data=paper_pdf,
+                    file_name=f"{selected_key}_paper.pdf", mime="application/pdf",
+                    use_container_width=True, type="primary")
+            with dc2:
+                ans_pdf = generate_pdf(preview_qs, dl_label + " — Answers", dl_exam, include_answers=True)
+                st.download_button("⬇️ With Answer Key (PDF)", data=ans_pdf,
+                    file_name=f"{selected_key}_answers.pdf", mime="application/pdf",
+                    use_container_width=True)
+
     if st.button("🚀 Start Mock Test", type="primary", use_container_width=False):
         if selected_key.startswith("__RANDOM"):
             exam_type = "CAT" if "CAT" in selected_key else "IPM"
@@ -675,3 +806,27 @@ elif st.session_state.page == "results":
                 col_a, col_b = st.columns(2)
                 col_a.markdown(f"**Your answer:** {user_display}")
                 col_b.markdown(f"**Correct answer:** {correct_display}")
+
+    # ── PDF Downloads ─────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 📄 Download Question Paper")
+    dl1, dl2 = st.columns(2)
+    with dl1:
+        paper_pdf = generate_pdf(qs, label, exam, include_answers=False)
+        st.download_button(
+            label="⬇️ Download Question Paper (PDF)",
+            data=paper_pdf,
+            file_name=f"{set_key}_question_paper.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
+        )
+    with dl2:
+        ans_pdf = generate_pdf(qs, label + " — Answer Key", exam, include_answers=True)
+        st.download_button(
+            label="⬇️ Download with Answer Key (PDF)",
+            data=ans_pdf,
+            file_name=f"{set_key}_with_answers.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
